@@ -1,103 +1,100 @@
-document.addEventListener("DOMContentLoaded", () => {
-    console.log("Page loaded...");
+// app.js (module)
 
-    // Firebase Setup
-    const firebaseConfig = {
-        apiKey: "YOUR_API_KEY",
-        authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-        databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com/",
-        projectId: "YOUR_PROJECT_ID",
-        storageBucket: "YOUR_PROJECT_ID.appspot.com",
-        messagingSenderId: "YOUR_SENDER_ID",
-        appId: "YOUR_APP_ID"
-    };
+// Firebase (v9+ modular) – import straight from the CDN
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+import {
+  getDatabase,
+  ref,
+  runTransaction
+} from "https://www.gstatic.com/firebasejs/10.12.4/firebase-database.js";
 
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const database = firebase.database();
+// ---- Your Firebase config (WITH databaseURL) ----
+const firebaseConfig = {
+  apiKey: "AIzaSyAftyX_ynICbUeOFjHCJPg-KIF7XO_cPnI",
+  authDomain: "dictionary-web-application.firebaseapp.com",
+  projectId: "dictionary-web-application",
+  storageBucket: "dictionary-web-application.firebasestorage.app",
+  messagingSenderId: "372959887057",
+  appId: "1:372959887057:web:4c81c931a6e7f2558c4ff0",
+  databaseURL: "https://dictionary-web-application-default-rtdb.asia-southeast1.firebasedatabase.app"
+};
 
-    // Visitor Count Function
-    const visitorDiv = document.getElementById("visitorCount");
-    
-    function updateVisitorCount() {
-        const visitorRef = database.ref("visitorCount");
+// Init Firebase
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-        visitorRef.once("value")
-            .then(snapshot => {
-                let count = snapshot.val() || 0;
-                count++;
-                visitorRef.set(count);
-                console.log("Visitor count updated to:", count);
-                visitorDiv.innerHTML = `<p><strong>Total Visitors:</strong> ${count}</p>`;
-            })
-            .catch(error => console.error("Firebase error:", error));
-    }
+// DOM refs
+const visitorDiv = document.getElementById("visitorCount");
+const searchBtn = document.getElementById("searchBtn");
+const wordInput = document.getElementById("wordInput");
+const resultDiv = document.getElementById("result");
+const loadingDiv = document.getElementById("loading");
 
-    updateVisitorCount(); // Call visitor count update function
-
-    // Dictionary API Search Setup
-    const searchBtn = document.getElementById("searchBtn");
-    const wordInput = document.getElementById("wordInput");
-    const resultDiv = document.getElementById("result");
-    const loadingDiv = document.getElementById("loading");
-
-    if (searchBtn) {
-        searchBtn.addEventListener("click", () => {
-            console.log("Search button clicked!");
-            searchWord();
-        });
-    }
-
-    wordInput.addEventListener("keypress", (event) => {
-        if (event.key === "Enter") {
-            searchWord();
-        }
+// --- Visitor counter (atomic increment) ---
+async function updateVisitorCount() {
+  try {
+    const counterRef = ref(db, "visitorCount");
+    const result = await runTransaction(counterRef, (current) => {
+      if (current === null || typeof current !== "number") return 1;
+      return current + 1;
     });
+    const count = result.snapshot.val();
+    visitorDiv.textContent = `Total Visitors: ${count}`;
+  } catch (err) {
+    console.error("Visitor counter error:", err);
+    visitorDiv.textContent = "Total Visitors: (error)";
+  }
+}
 
-    function searchWord() {
-        let word = wordInput.value.trim().toLowerCase();
+// --- Dictionary look-up ---
+function searchWord() {
+  const word = wordInput.value.trim().toLowerCase();
+  if (!word) {
+    resultDiv.innerHTML = "<p>Please enter a word.</p>";
+    return;
+  }
 
-        if (word === "") {
-            resultDiv.innerHTML = "<p>Please enter a word.</p>";
-            return;
-        }
+  loadingDiv.style.display = "block";
+  resultDiv.innerHTML = "";
 
-        loadingDiv.style.display = "block";
-        resultDiv.innerHTML = "";
+  fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`)
+    .then(r => r.json())
+    .then(data => {
+      loadingDiv.style.display = "none";
+      if (!Array.isArray(data) || !data[0] || !data[0].meanings) {
+        resultDiv.innerHTML = `<p>Word not found. Try another.</p>`;
+        return;
+      }
 
-        fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`)
-            .then(response => response.json())
-            .then(data => {
-                loadingDiv.style.display = "none";
-                console.log("API response received:", data);
+      const entry = data[0];
+      const meaningsHTML = entry.meanings.map(m => {
+        const def = m.definitions?.[0]?.definition || "No definition found.";
+        const ex = m.definitions?.[0]?.example || "No example available.";
+        return `<p><strong>${m.partOfSpeech}</strong>: ${def}<br><em>${ex}</em></p>`;
+      }).join("");
 
-                if (!data[0] || !data[0].meanings) {
-                    resultDiv.innerHTML = `<p>Word not found. Try another.</p>`;
-                    return;
-                }
+      const phonetics = entry.phonetics?.[0]?.text || "No pronunciation found.";
+      const audio = (entry.phonetics || []).find(p => p.audio)?.audio;
 
-                let meaningsHTML = data[0].meanings.map(meaning => {
-                    let definition = meaning.definitions[0]?.definition || "No definition found.";
-                    let example = meaning.definitions[0]?.example || "No example available.";
-                    return `<p><strong>${meaning.partOfSpeech}</strong>: ${definition}<br><em>${example}</em></p>`;
-                }).join("");
+      resultDiv.innerHTML = `
+        <h2>${word}</h2>
+        ${meaningsHTML}
+        <p><strong>Pronunciation:</strong> ${phonetics}</p>
+        ${audio ? `<audio controls><source src="${audio}" type="audio/mpeg"></audio>` : ""}
+      `;
+    })
+    .catch(err => {
+      console.error("Dictionary API error:", err);
+      loadingDiv.style.display = "none";
+      resultDiv.innerHTML = `<p>Something went wrong. Please try again later.</p>`;
+    });
+}
 
-                let phonetics = data[0].phonetics[0]?.text || "No pronunciation found.";
-                let audio = data[0].phonetics.find(p => p.audio)?.audio;
-
-                resultDiv.innerHTML = `
-                    <h2>${word}</h2>
-                    ${meaningsHTML}
-                    <p><strong>Pronunciation:</strong> ${phonetics}</p>
-                    ${audio ? `<audio controls><source src="${audio}" type="audio/mpeg"></audio>` : ""}
-                `;
-            })
-            .catch(error => {
-                console.error("Error fetching data:", error);
-                loadingDiv.style.display = "none";
-                resultDiv.innerHTML = `<p>Something went wrong. Please try again later.</p>`;
-            });
-    }
-
-    wordInput.placeholder = "Type a word...";
+// Events
+searchBtn?.addEventListener("click", searchWord);
+wordInput?.addEventListener("keypress", (e) => {
+  if (e.key === "Enter") searchWord();
 });
+
+// Init
+updateVisitorCount();
